@@ -2,11 +2,25 @@ import WebSocket from "ws";
 import {promises as fs} from "fs";
 import path from "path";
 
-const TOKEN = process.env.AUTH_TOKEN;
+const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
-init();
+const resp = await fetch("https://www.reddit.com/r/place/?screenmode=preview", {
+    headers: {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+    },
+});
 
-function init() {
+const body = await resp.text();
+const token =/"accessToken"\s*:\s*"(?<token>[^"]+)"/.exec(body)?.groups?.token?.trim();
+
+if (! token) {
+    console.error("Could not extract token!");
+    process.exit();
+}
+
+init().catch(console.error);
+
+async function init() {
     const ws = new WebSocket("wss://gql-realtime-2.reddit.com/query", {
         headers: {
             origin: "https://garlic-bread.reddit.com",
@@ -23,11 +37,12 @@ function init() {
             clearTimeout(pingTimeout);
         }
 
-        pingTimeout = setTimeout(() => {
+        pingTimeout = setTimeout(async () => {
             console.log("Timeout reached! Connection terminated!");
             ws.terminate();
             console.log("Reconnecting...");            
-            init();
+            await sleep(2000);
+            init().catch(console.error);
         }, 25 * 1000);
     }
 
@@ -35,14 +50,16 @@ function init() {
     ws.on('error', console.error);
     ws.on('open', heartbeat);
     ws.on('ping', heartbeat);
-    ws.on('close', () => {
+    ws.on('close', async () => {
         console.log("Connection closed! Reconnecting...");
         ws.terminate();
-        init();
+        await sleep(2000);
+        clearTimeout(pingTimeout)
+        init().catch(console.error);
     });
 
     ws.on('open', function open() {
-        const init_payload = { type: "connection_init", payload: { Authorization: TOKEN } };
+        const init_payload = { type: "connection_init", payload: { Authorization: `Bearer ${token}` } };
         const gqlPayload = {
            "id":"1",
            "type":"start",
